@@ -31,9 +31,9 @@
  * Import, export and usage of Huawei LiteOS in any manner by you shall be in compliance with such
  * applicable export control laws and regulations.
  *---------------------------------------------------------------------------*/
-
+#include <string.h>
+#include <stdlib.h>
 #include <osport.h>
-#include <DHT11_BUS.h>
 
 //show the led welcome information
 extern void led_display(void); 
@@ -42,18 +42,35 @@ extern void led_display(void);
 extern bool_t bc95_init(const char *server);
 extern bool_t bc95_send(u8_t *buf,s32_t len, u32_t timeout);
 extern void bc95_regester_receivehandle(void *handle);
+extern bool_t bc95_csq(u32_t *value);
 
 //led control
 extern void led_on(void);
 extern void led_off(void);
 
+//bh1750 read
+extern float Convert_BH1750(void);
+extern void Init_BH1750(void);
+
+
 //enum all the message type
 typedef enum
 {
-    en_msgid_net = 0,
-    en_msgid_dht11 ,
-    en_msgid_cmd_led,
+    en_msgid_light_intensity = 0,
+    en_msgid_light_state,
+    en_msgid_light_ctrl,
+    en_msgid_net_csq,
 }en_app_msgid;
+
+struct app_report
+{
+    u32_t timeout;
+    bool_t report;  //if false then pause report
+};
+static struct app_report  s_app_report;
+
+
+static bool_t s_led_state = false;
 
 //this function used to deal all the received message here
 //message format:msgid+content
@@ -65,15 +82,17 @@ static void  deal_rcvmsg(u8_t *data, s32_t len)
     msgid = *data;
     switch (msgid)
     {
-        case en_msgid_cmd_led:
+        case en_msgid_light_ctrl:
             str = (char *)data+1;
             if(0 == strcmp(str,"ON"))
             {
                 led_on();
+                s_led_state = true;
             }
             else if(0 == strcmp(str,"OFF"))
             {
                 led_off();
+                s_led_state = false;
             }
             else
             {
@@ -87,44 +106,108 @@ static void  deal_rcvmsg(u8_t *data, s32_t len)
     return;
 }
 
+//do the light intensity report
+static void report_light_intensity()
+{
+    u8_t   sendbuf[32];
+    u32_t  value;
+
+    //sample light intensity and report
+    value = Convert_BH1750();
+    printf("%s:sample light:%d\r\n",__FUNCTION__,value);
+
+    memset(sendbuf,0,32);
+    sendbuf[0] = en_msgid_light_intensity;
+    sendbuf[1] = (u8_t)((value>>24)&0xff);  //send the byte net sequence:big endian
+    sendbuf[2] = (u8_t)((value>>16)&0xff);
+    sendbuf[3] = (u8_t)((value>>8)&0xff);
+    sendbuf[4] = (u8_t)((value>>0)&0xff);
+    if(bc95_send(sendbuf,5,2*1000))
+    {
+        printf("sendmsg OK:%s\n\r",(char *)sendbuf);
+    }
+    else
+    {
+        printf("sendmsg ERR:%s\n\r",(char *)sendbuf);
+    }
+}
+//do the light state report
+static void report_light_state()
+{
+    u8_t   sendbuf[32];
+    //report the light state
+    memset(sendbuf,' ',32);
+    sendbuf[0] = en_msgid_light_state;
+    if(s_led_state)
+    {
+        sprintf((char *)&sendbuf[1],"%s","ON ");
+    }
+    else
+    {
+        sprintf((char *)&sendbuf[1],"%s","OFF");
+    }
+    if(bc95_send(sendbuf,4,2*1000))
+    {
+        printf("sendmsg OK:%s\n\r",(char *)sendbuf);
+    }
+    else
+    {
+        printf("sendmsg ERR:%s\n\r",(char *)sendbuf);
+    }
+
+}
+
+//do the net csq report
+static void report_net_csq()
+{
+    u8_t   sendbuf[32];
+    u32_t  value;
+    //sample the net and report
+    if(bc95_csq(&value))
+    {
+        printf("%s:sample csq:%d\r\n",__FUNCTION__,value);            
+    }
+    else
+    {
+        printf("%s:sample csq failed\r\n",__FUNCTION__);
+    }
+    
+    memset(sendbuf,0,32);
+    sendbuf[0] = en_msgid_net_csq;
+    sendbuf[1] = (u8_t)((value>>0)&0xff);  //send the byte net sequence:big endian
+    if(bc95_send(sendbuf,2,2*1000))
+    {
+        printf("sendmsg OK\r\n");
+    }
+    else
+    {
+        printf("sendmsg ERR\r\n");
+    }
+
+
+}
+
 //this is app main function:loop
 u32_t app_main(void *args)
-{
-    u8_t sendbuf[32];
-    u8_t msgid;
-    DHT11_Data_TypeDef  DHT11_Data;
-
+{   
+    s_app_report.timeout = 5*1000;
+ 
+    Init_BH1750();
     led_display();
     bc95_init("139.159.140.34");
     bc95_regester_receivehandle(deal_rcvmsg);
-    DHT11_Init();   //do reinilialize    
-    
     while(1)
-    {
-        //sample the data and report
-        if(DHT11_Read_TempAndHumidity(&DHT11_Data)==SUCCESS)
+    {        
+        if(s_app_report.report)
         {
-            printf("READ DHT11 OK:Humidity:%.1f Temprature:%.1f \r\n",DHT11_Data.humidity,DHT11_Data.temperature);
-            memset(sendbuf,0,32);
-            msgid = en_msgid_dht11;
-            sendbuf[0] = msgid;
-            snprintf((char *)&sendbuf[1],32,"%.1f%.1f",DHT11_Data.temperature,DHT11_Data.humidity);
-            if(bc95_send(sendbuf,1+strlen((char *)&sendbuf[1]),2*1000))
-            {
-                printf("sendmsg OK:%s\n\r",(char *)sendbuf);
-            }
-            else
-            {
-                printf("sendmsg ERR:%s\n\r",(char *)sendbuf);
-            }
+            report_light_intensity();
+            
+            report_light_state();
+
+            report_net_csq();
         }
-        else
-        {
-            printf("∂¡»°DHT11–≈œ¢ ß∞‹\r\n");
-            DHT11_Init();   //do reinilialize
-            continue;
-        }   
-        task_sleepms(20*1000);   
+
+        task_sleepms(s_app_report.timeout);   
     }
 }
 
@@ -163,3 +246,35 @@ static s32_t shell_appsend(s32_t argc, const char *argv[])
 
 }
 OSSHELL_EXPORT_CMD(shell_appsend,"appsend","appsend msgid data");
+
+//create a command to control the report 
+static s32_t shell_appreport(s32_t argc,const char *argv[])
+{
+    if(argc <2)
+    {
+        return -1;
+    }
+    
+    if((0 == strcmp(argv[1],"timeout"))&&(argc == 3))
+    {
+        s_app_report.timeout = strtoul(argv[2],NULL,0);
+    }
+    else if(0 == strcmp(argv[1],"stop"))
+    {
+        s_app_report.report = false;
+    }
+    else if(0 == strcmp(argv[1],"start"))
+    {
+        s_app_report.report = true;
+    }
+    else
+    {
+    
+    }
+    return 0;
+
+}
+OSSHELL_EXPORT_CMD(shell_appreport,"appreport","appreport pause/start/timeout [timeout]");
+
+
+

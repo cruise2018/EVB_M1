@@ -722,24 +722,24 @@
               <FilePath>../Src/main.c</FilePath>
             </File>
             <File>
-              <FileName>uart_debug.c</FileName>
+              <FileName>app.c</FileName>
               <FileType>1</FileType>
-              <FilePath>.\uart_debug.c</FilePath>
-            </File>
-            <File>
-              <FileName>uart_at.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>.\uart_at.c</FilePath>
+              <FilePath>..\AppDrive\app.c</FilePath>
             </File>
             <File>
               <FileName>bc95.c</FileName>
               <FileType>1</FileType>
-              <FilePath>.\bc95.c</FilePath>
+              <FilePath>..\AppDrive\bc95.c</FilePath>
             </File>
             <File>
-              <FileName>app.c</FileName>
+              <FileName>uart_at.c</FileName>
               <FileType>1</FileType>
-              <FilePath>.\app.c</FilePath>
+              <FilePath>..\AppDrive\uart_at.c</FilePath>
+            </File>
+            <File>
+              <FileName>uart_debug.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\AppDrive\uart_debug.c</FilePath>
             </File>
           </Files>
         </Group>
@@ -765,11 +765,6 @@
               <FileName>iodev.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\..\comnew\osport\iodev.c</FilePath>
-            </File>
-            <File>
-              <FileName>kernel.c</FileName>
-              <FileType>1</FileType>
-              <FilePath>..\..\..\comnew\osport\kernel.c</FilePath>
             </File>
             <File>
               <FileName>osport.h</FileName>

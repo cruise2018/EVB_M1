@@ -126,5 +126,4 @@ __attribute__((used)) int _read(int fd, char *ptr, int len)
     return 1;
 }
 
-
 #endif

@@ -75,8 +75,8 @@ struct at_cb
 {
     fnframe_read            read;     //the member function to read a frame from the at module
     fnframe_write           write;    //the member function to write a frame to the at module
-    fnoob                   funcpass; //the member function to deal the default data
-    struct at_cmd           cmd;      //the at command,only one command could be excuted
+    fnoob                   funcpass; //the member function to deal the passby data
+    struct at_cmd           cmd;       //the at command,only one command could be excuted
     struct at_oob           oob[cn_at_oob_len];        //storage the out of band dealer
     u8_t                    rcvbuf[cn_at_resp_maxlen]; //used storage one frame,read from the at channel
     u32_t                   passmode:1;                //if zero, then use the at mode,else use the pass mode,pass all the data to fnoob
@@ -263,7 +263,7 @@ static u32_t __rcv_task_entry(void *args)
             if(0 == g_at_cb.passmode)
             {
                 matchret = __cmd_match(g_at_cb.rcvbuf,rcvlen);
-                if(matchret == false)
+                if(false == matchret)
                 {
                     __oob_match(g_at_cb.rcvbuf,rcvlen);
                 }
@@ -301,6 +301,8 @@ bool_t at_workmode(bool_t passby,fnoob func)
     return true;
 }
 
+
+
 /*******************************************************************************
 function     :this is our at command here,you could send any command as you wish
 parameters   :
@@ -313,14 +315,21 @@ s32_t  at_command(u8_t *cmd,s32_t cmdlen,const char *index,u8_t *respbuf,s32_t r
     s32_t ret = 0;
     if((NULL != cmd))//which means no response need
     {
-        if(__cmd_create(cmd,cmdlen,index,respbuf,respbuflen,timeout))
+        if(NULL != index)
         {
-            __cmd_send(cmd,cmdlen,timeout);
-            if(semp_pend(g_at_cb.cmd.respsync,timeout))
+            if(__cmd_create(cmd,cmdlen,index,respbuf,respbuflen,timeout))
             {
-                ret = g_at_cb.cmd.respdatalen;         
+                __cmd_send(cmd,cmdlen,timeout);
+                if(semp_pend(g_at_cb.cmd.respsync,timeout))
+                {
+                    ret = g_at_cb.cmd.respdatalen;         
+                }
+                __cmd_clear();
             }
-            __cmd_clear();
+        }
+        else
+        {
+            ret = __cmd_send(cmd,cmdlen,timeout);
         }
     }
     return ret;
@@ -431,18 +440,25 @@ static s32_t shell_at(s32_t argc, const char *argv[])
      
     u8_t respbuf[CN_AT_SHELL_LEN];
     u8_t cmdbuf[CN_AT_SHELL_LEN];
+    
+    const char *index =NULL ;
     s32_t ret = -1;
 
-    if(argc != 3)
+    if((argc !=2)&&(argc != 3))
     {
         printf("paras error\n\r");
         return ret;
     }
+    if(argc == 3)
+    {
+        index = argv[2];
+    }
+    
 
     memset(respbuf,0,CN_AT_SHELL_LEN);
     snprintf((char *)cmdbuf,CN_AT_SHELL_LEN,"%s\r",argv[1]);
 
-    ret = at_command(cmdbuf,strlen((const char *)cmdbuf),argv[2],respbuf,CN_AT_SHELL_LEN,LOSCFG_BASE_CORE_TICK_PER_SECOND); //one second
+    ret = at_command(cmdbuf,strlen((const char *)cmdbuf),index,respbuf,CN_AT_SHELL_LEN,LOSCFG_BASE_CORE_TICK_PER_SECOND); //one second
     if(ret > 0)
     {
         printf("atresponse:%d Bytes:%s\n\r",ret,respbuf);
@@ -453,7 +469,7 @@ static s32_t shell_at(s32_t argc, const char *argv[])
     }
     return ret;
 }
-OSSHELL_EXPORT_CMD(shell_at,"at","at atcommand atrespindex");
+OSSHELL_EXPORT_CMD(shell_at,"atcmd","atcmd atcommand atrespindex");
 
 //use this function to set the at command display mode:none/ascii/hex
 static s32_t shell_atdebug(s32_t argc,const char *argv[])

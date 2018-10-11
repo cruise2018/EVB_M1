@@ -36,6 +36,9 @@
 //the bc95 module;
 #include <at.h>  
 
+#define cn_bc95_cmd_timeout  (2*1000)
+#define cn_try_times          (10)
+
 
 typedef void (*fnhandle)(u8_t *data, s32_t len);
 #define cn_bc95_cachelen 128
@@ -54,18 +57,15 @@ static struct bc95_cb   s_bc95_cb;
 //use this function to register a handle to deal with the received data
 void bc95_regester_receivehandle(void *handle)
 {
-    s_bc95_cb.rcvhandle = handle;
+    s_bc95_cb.rcvhandle = (fnhandle)handle;
     return;
 }
 
-//do the module reboot here:used by the module init;true success while false failed
-static bool_t bc95_nrb(void)
+//bc95 common at command
+static bool_t bc95_atcmd(const char *cmd,const char *index)
 {
-    const char *cmd = "AT+NRB\r";
-    const char *index = "REBOOTING";
     s32_t ret = 0;
-
-    ret = at_command((u8_t *)cmd,strlen(cmd),index,NULL,0,1000*5);
+    ret = at_command((u8_t *)cmd,strlen(cmd),index,NULL,0,cn_bc95_cmd_timeout);
     if(ret > 0)
     {
         return true;
@@ -74,63 +74,46 @@ static bool_t bc95_nrb(void)
     {
         return false;
     } 
-} 
+}
 
-//connect to the network
-static bool_t bc95_cgatt(void)
-{
-    const char *cmd = "AT+CGATT?\r";
-    const char *index = "CGATT:1";
-    s32_t ret = 0;
 
-    ret = at_command((u8_t *)cmd,strlen(cmd),index,NULL,0,1000*5);
-    if(ret > 0)
-    {
-        return true;
-    }
-    else
-    {
-        return false;
-    } 
-} 
-//set the receive mode
-static bool_t bc95_nnmi(void)
-{
-    const char *cmd = "AT+NNMI=1\r";
-    const char *index = "OK";
-    s32_t ret = 0;
 
-    ret = at_command((u8_t *)cmd,strlen(cmd),index,NULL,0,1000*5);
-    if(ret > 0)
-    {
-        return true;
-    }
-    else
-    {
-        return false;
-    } 
-} 
-//set the ncdp
-static bool_t bc95_ncdp(const char *server)
+//this function to get the csq
+bool_t bc95_csq(u32_t *value)
 {
     char cmd[64];
+    u8_t resp[64];
     const char *index = "OK";
-    s32_t ret = 0;
+    const char *str;
+    u32_t csq = 0;
+    bool_t ret = false;
+    
+    if(NULL == value)
+    {
+        return ret;
+    }
 
     memset(cmd,0,64);
-    snprintf(cmd,64,"AT+NCDP=%s\r",server);
-    ret = at_command((u8_t *)cmd,strlen(cmd),index,NULL,0,1000*5);
-    if(ret > 0)
+    memset(resp,0,64);
+    snprintf(cmd,64,"AT+CSQ\r");
+    if(at_command((u8_t *)cmd,strlen(cmd),index,resp,64,cn_bc95_cmd_timeout))
     {
-        return true;
+        str = strstr((char *)resp,"+CSQ:");
+        if(NULL != str)
+        {
+            str += strlen("+CSQ:");
+            for (; *str <= '9' && *str >= '0' ;str++)
+            {
+                csq = (csq * 10 + (*str - '0'));
+            }
+            *value = csq;
+            ret =true;
+        }
     }
-    else
-    {
-        return false;
-    } 
-} 
+    return ret;
+}
 
-
+//make a byte to 2 ascii hex
 static int bc95_str_to_hex(const unsigned char *bufin, int len, char *bufout)
 {
     int i = 0;
@@ -249,76 +232,85 @@ static s32_t bc95_rcvdeal(u8_t *data,s32_t len)
     return len;    
 }
 
-#define cn_try_times  10
 bool_t bc95_init(const char *server)
 {
     bool_t ret = false;
     s32_t times = 0;
+    
+    char ncdp[32];
+    memset(ncdp,0,32);
+    snprintf(ncdp,32,"AT+NCDP=%s\r",server);
+    
     while(1)
     {
-        //do the module reset
-        bc95_nrb();
-        task_sleepms(5000); //wait for some time
-        
+        //do the module reset 
+        bc95_atcmd("ATE0\r","OK");
+        bc95_atcmd("AT+NRB\r","REBOOTING");
+        task_sleepms(5000); //wait for some time  
+
+        //make the echo off
+        bc95_atcmd("ATE0\r","OK"); 
+        bc95_atcmd("AT+NCONFIG=AUTOCONNECT,TRUE\r","OK");
         //wait for the cgatt
-        printf("wait for the network. ");
         times = cn_try_times;
         for(times =0;times <cn_try_times;times++ )
         {
-            ret = bc95_cgatt();
+            ret = bc95_atcmd("AT+CGATT?\r","CGATT:1");;
             if(ret)
             {
+                printf("wait for the network. OK\r\n");
                 break;
             }
-            printf("\b%d",times);
-            task_sleepms(2000);
+            else
+            {
+                printf("wait for the network. FAILED\r\n");
+            }
         }
         if(false == ret)
         {
-            printf("failed \n\r");
             continue;
         }
-        printf("OK \n\r");
 
         //set the ncdp
         times = cn_try_times;
-        printf("set ncdp and wait  ");
         for(times =0;times <cn_try_times;times++ )
         {
-            ret = bc95_ncdp(server);
+            ret = bc95_atcmd(ncdp,"OK");;
             if(ret)
             {
+                printf("wait for the ncdp. OK\r\n");
                 break;
             }
-            printf("\b%d",times);
-            task_sleepms(2000);
+            else
+            {
+                printf("wait for the ncdp. FAILED\r\n");
+            }
         }
         if(false == ret)
         {
-            printf("failed \n\r");
             continue;
         }
-        printf("OK \n\r");
         
         //make the report auto
         printf("set nnmi and wait  ");
         times = cn_try_times;
         for(times =0;times <cn_try_times;times++ )
         {
-            ret = bc95_nnmi();
+            ret = bc95_atcmd("AT+NNMI=1\r","OK");;
             if(ret)
             {
+                printf("wait for the nnmi. OK\r\n");
                 break;
             }
-            printf("\b%d",times);
-            task_sleepms(2000);
+            else
+            {
+                printf("wait for the nnmi. FAILED\r\n");
+            }
         }
         if(false == ret)
         {
-            printf("  failed \n\r");
             continue;
         }
-        printf("  OK \n\r");    
         break;
     }
    //reach here means everything is ok, we can go now
@@ -353,8 +345,6 @@ static s32_t shell_bc95send(s32_t argc, const char *argv[])
 
 }
 OSSHELL_EXPORT_CMD(shell_bc95send,"bc95send","bc95send data");
-
-
 
 
 
