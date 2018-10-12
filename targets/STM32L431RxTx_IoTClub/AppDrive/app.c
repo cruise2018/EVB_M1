@@ -53,6 +53,9 @@ extern float Convert_BH1750(void);
 extern void Init_BH1750(void);
 
 
+#define cn_app_report_timeout  (2*1000)
+
+
 //enum all the message type
 typedef enum
 {
@@ -116,19 +119,17 @@ static void report_light_intensity()
     value = Convert_BH1750();
     printf("%s:sample light:%d\r\n",__FUNCTION__,value);
 
-    memset(sendbuf,0,32);
+    memset(sendbuf,' ',32);
     sendbuf[0] = en_msgid_light_intensity;
-    sendbuf[1] = (u8_t)((value>>24)&0xff);  //send the byte net sequence:big endian
-    sendbuf[2] = (u8_t)((value>>16)&0xff);
-    sendbuf[3] = (u8_t)((value>>8)&0xff);
-    sendbuf[4] = (u8_t)((value>>0)&0xff);
-    if(bc95_send(sendbuf,5,2*1000))
+    sprintf((char *)&sendbuf[1],"%5d",(s32_t)value);
+
+    if(bc95_send(sendbuf,6,cn_app_report_timeout))
     {
-        printf("sendmsg OK:%s\n\r",(char *)sendbuf);
+        printf("sendmsg OK \n\r");
     }
     else
     {
-        printf("sendmsg ERR:%s\n\r",(char *)sendbuf);
+        printf("sendmsg ERR \n\r");
     }
 }
 //do the light state report
@@ -174,8 +175,8 @@ static void report_net_csq()
     
     memset(sendbuf,0,32);
     sendbuf[0] = en_msgid_net_csq;
-    sendbuf[1] = (u8_t)((value>>0)&0xff);  //send the byte net sequence:big endian
-    if(bc95_send(sendbuf,2,2*1000))
+    sprintf((char *)&sendbuf[1],"%3d",(s32_t)value);
+    if(bc95_send(sendbuf,4,cn_app_report_timeout))
     {
         printf("sendmsg OK\r\n");
     }
@@ -183,8 +184,6 @@ static void report_net_csq()
     {
         printf("sendmsg ERR\r\n");
     }
-
-
 }
 
 //this is app main function:loop
