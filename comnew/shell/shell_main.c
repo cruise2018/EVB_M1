@@ -180,6 +180,14 @@ static void  shell_moves_cursor_right(int times,u32_t vk){
 	}
 }
 /*******************************************************************************
+function     :function used ring the terminal's bell
+parameters   :
+instruction  :
+*******************************************************************************/
+static void shell_bell() {
+	shell_put_char('\a');
+}
+/*******************************************************************************
 function     :function used to move cursor left
 parameters   :
 instruction  :
@@ -259,7 +267,8 @@ static u32_t shell_server_entry(void *args){
 					shell_cmd_cache.curoffset--;
 					//push back the left cursor and make the terminal display know what has happened
 					shell_moves_cursor_left(1);
-				}
+				}else
+					shell_bell();
 				//flush the vk
 				vk = CN_VIRTUAL_KEY_NULL;
 				vkmask = CN_VIRTUAL_KEY_NULL;
@@ -270,7 +279,8 @@ static u32_t shell_server_entry(void *args){
 					shell_cmd_cache.curoffset++;
 					//push back the right cursor and make the terminal display know what has happened
 					shell_moves_cursor_right(1,vk);
-				}
+				} else
+				shell_bell();
 				//flush the vk
 				vk = CN_VIRTUAL_KEY_NULL;
 				vkmask = CN_VIRTUAL_KEY_NULL;
@@ -376,34 +386,43 @@ static u32_t shell_server_entry(void *args){
 				break;
 			case CN_KEY_BS:      //should delete the current character,move all the following character 1 position to before
 				if(shell_cmd_cache.curoffset >0){
-					shell_cmd_cache.curcmd[shell_cmd_cache.curoffset] = 0;
+					char *substr = shell_cmd_cache.curcmd + shell_cmd_cache.curoffset;
+					int len = strlen(substr);
+					shell_put_char('\b');
+					shell_put_string(substr);
+					shell_put_char(' ');
+					shell_moves_cursor_left(len + 1);
+					
+					strcpy(substr - 1, substr);
 					shell_cmd_cache.curoffset--;
-					shell_put_backspace(1);
-				}
+				} else
+					shell_bell();
 				//flush the vk
 				vk = CN_VIRTUAL_KEY_NULL;
 				vkmask = CN_VIRTUAL_KEY_NULL;
 				break;
 			case CN_KEY_ES:      //esc key,delete all the input here
-				len = strlen(shell_cmd_cache.curcmd);
-				if(shell_cmd_cache.curoffset < len){
-					shell_put_space(len - shell_cmd_cache.curoffset);
-					shell_cmd_cache.curoffset = len;
-				}
-				shell_put_backspace(len);
-				memset(shell_cmd_cache.curcmd,0,CN_CMDLEN_MAX);
-				shell_cmd_cache.curoffset = 0;
-				//this is also the transfer code
 				vk= CN_KEY_ES;
 				vkmask = CN_KEY_ES;
 				break;
 			default: //other control character will be ignored
 				//push the character to the buffer until its full and the '\n' comes
 				if(shell_cmd_cache.curoffset <(CN_CMDLEN_MAX-1)){
-					shell_cmd_cache.curcmd[shell_cmd_cache.curoffset] = ch;
+					char *substr = shell_cmd_cache.curcmd + shell_cmd_cache.curoffset;
+					shell_put_char(ch);
+					shell_put_string(substr);
+					shell_moves_cursor_left(strlen(substr));
+					
+					char *p = shell_cmd_cache.curcmd + strlen(shell_cmd_cache.curcmd);
+					*(p + 1) = 0;
+					while (p != substr) {
+						*p = *(p - 1);
+						p--;
+					}
+					*p = ch;
 					shell_cmd_cache.curoffset++;
-					shell_put_char(ch);   //should do the echo
-				}
+				} else
+					shell_bell();
 				//flush the vk
 				vk = CN_VIRTUAL_KEY_NULL;
 				vkmask = CN_VIRTUAL_KEY_NULL;
